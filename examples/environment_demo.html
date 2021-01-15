@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+<meta charset="utf-8">
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <link rel="stylesheet" href="../src/style.css">
+</head>
+<body style="width: 50%;">
+  <h3>Environment demo</h3>
+  <p>
+    This example demonstrates loading an environment, recording a
+    <a href="https://github.com/google-research-datasets/RxR/tree/main/visualizations">pose trace</a>,
+    and replaying the pose trace.
+  </p>
+  <ul>
+    <li>Press the "Start Environment" button to load the environment and begin recording the pose trace.</li>
+    <li>
+      Look around the room by dragging the screen and move around the room by double-clicking. The
+      <strong style="color: #888800;">YELLOW</strong> square indicates where you will move to next
+      upon double-clicking.
+    </li>
+    <li>Press the "Stop Environment" button to replay the recorded pose trace.</li>
+  </ul>
+  <button id="start-button">Start Environment</button>
+  <button id="stop-button" disabled>Stop Environment</button>
+  <br>
+  <br>
+  <div id="env-div" style="width: 1000px; height: 500px;">
+    <div id="env-blocker" style="position: absolute; z-index: 1; width: 1000px; height: 500px; background-color: rgba(0,0,0,0.5);"></div>
+    <canvas id="env-canvas" width="1000px" height="500px" style="position: absolute; z-index: 0; width: 1000px; height: 500px;"></canvas>
+  </div>
+  <p id="snapshot-buffer"></p>
+</body>
+<script type="module">
+  import * as pangea from '../src/index.js';
+
+  function formatTime(time) {
+    const date = new Date(0);
+    date.setMilliseconds(time);
+    return date.toISOString().substr(11, 8);
+  }
+
+  function processPano(pano) {
+    pano.urls = pano.urls.map((url) => `../testdata/${url}`);
+    pano.curpos = new THREE.Vector3().fromArray(pano.curpos);
+    pano.exmat = new THREE.Matrix4().fromArray(pano.exmat);
+    return pano;
+  }
+
+  async function main() {
+    // https://threejs.org/examples/webgl_lights_physical.html
+    const env = new pangea.Navigator([
+      await $.getJSON('../testdata/pano0.json').then(processPano),
+      await $.getJSON('../testdata/pano1.json').then(processPano),
+    ], new THREE.SphereGeometry(100, 100, 100), $('#env-canvas')[0]);
+    env.setPanorama(env.panos[0].id);
+
+    // Fix the aspect ratio.
+    env.camera.aspect = env.canvas.width / env.canvas.height;
+    env.camera.updateProjectionMatrix();
+
+    let snapshots = [];
+    const record = new pangea.Animation(() => {
+      env.update();
+      snapshots.push({...env.getSnapshot(), time: record.elapsedTime});
+    });
+
+    $('#start-button').on('click', () => {
+      $('#start-button').attr('disabled', true);
+      $('#stop-button').attr('disabled', false);
+      $('#env-blocker').fadeOut();
+      env.controls.enabled = true;
+      record.start();
+    });
+
+    $('#stop-button').on('click', async () => {
+      $('#stop-button').attr('disabled', true);
+      $('#env-blocker').fadeIn();
+      env.controls.enabled = false;
+      record.stop();
+      const totalTime = snapshots[snapshots.length - 1].time;
+      await new Promise((resolve, reject) => {
+        const replay = new pangea.Animation(() => {
+          if (replay.elapsedTime > totalTime) {
+            replay.stop();
+            resolve();
+          } else if (snapshots.length) {
+            const snapshot = pangea.keymin(snapshots, (snapshot) => {
+              return Math.abs(snapshot.time - replay.elapsedTime);
+            });
+            env.setSnapshot(snapshot);
+            env.update();
+            $('#snapshot-buffer').html(`${formatTime(replay.elapsedTime)} / ${formatTime(totalTime)}`);
+          }
+        });
+        replay.start();
+        $('#snapshot-buffer').fadeIn();
+      });
+      $('#start-button').attr('disabled', false);
+      $('#snapshot-buffer').fadeOut();
+      // Empty the snapshot buffer.
+      record.elapsedTime = 0;
+      snapshots = [];
+    });
+  }
+
+  main();
+</script>

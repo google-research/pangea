@@ -1,0 +1,19 @@
+{
+  "path_id": 6650,
+  "split": "train",
+  "scan": "1LXtFkjw3qL",
+  "heading": 1.578857161615896,
+  "path": [
+    "15791b161c944d269ae3727bf19fc1a6",
+    "751a95287d8e487eac608776f5e3a546",
+    "8c6c60e241e34c0685171c4f55322940",
+    "c3b46ef0552142a6b62a45cd30f26de8",
+    "ad2772104c144a579f0a43503cb4c86b",
+    "ae407deab28949e8b8daede6749be158"
+  ],
+  "instruction_id": 46944,
+  "annotator_id": 156,
+  "language": "en-IN",
+  "instruction": "Now you are standing in-front of a closed door, turn to your left, you can see two wooden steps, climb the steps and walk forward by crossing a wall paint which is to your right side, you can see open door  enter into it. This is a gym room, move forward, walk till the end of the room, you can see a grey colored ball to the corner of the room, stand there, that's your end point.",
+  "audio": "audio.mp3"
+}

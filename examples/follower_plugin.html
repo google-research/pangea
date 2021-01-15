@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<!--
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+<meta charset="utf-8">
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-app.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-auth.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-firestore.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-storage.js"></script>
+  <link rel="stylesheet" href="../src/style.css">
+</head>
+<body style="margin: auto; width: 50%;">
+  <div id="inst-tab">
+    <h2>Instructions</h2>
+    <div id="external-inst"></div><script>$('#external-inst').load('follower_instructions.html');</script>
+    <button id="begin-button">Begin</button>
+  </div>
+  <div id="nav-tab" style="display: none;">
+    <div id="env-div" style="width: 1000px; height: 500px;">
+      <div id="env-blocker" style="position: absolute; z-index: 1; width: 1000px; height: 500px; background-color: rgba(0,0,0,0.5);"></div>
+      <canvas id="env-canvas" width="1000px" height="500px" style="position: absolute; z-index: 0; width: 1000px; height: 500px;"></canvas>
+    </div>
+    <br>
+    <audio controls id="audio-controls" style="width: 1000px;"></audio>
+    <br>
+    <br>
+    <button id="reload-button">Reload</button>
+    <button id="submit-button" disabled>Submit</button>
+    <p id="upload-prog-flag" style="display: none;">Uploading in the background...</p>
+    <p id="upload-done-flag" style="display: none;">Upload complete</p>
+  </div>
+</body>
+<script type="module">
+  import * as pangea from '../src/index.js';
+  import {doGoogleLogin, uploadBlob} from '../src/firebase.js';
+
+  // Find your app config here: https://console.firebase.google.com
+  const FIREBASE_APP_CONFIG = {};
+  const FIRESTORE_COLLECTION = '';
+  const USE_FIREBASE = false;
+  const USE_GOOGLE_LOGIN = false;
+
+  async function main() {
+    // Args provided by your crowdsourcing service.
+    const args = await $.getJSON('../testdata/args.json');
+
+    let user;
+    if (USE_FIREBASE) {
+      // Firebase app initialization.
+      firebase.initializeApp(FIREBASE_APP_CONFIG);
+      if (USE_GOOGLE_LOGIN) {
+        user = await doGoogleLogin();
+      }
+    } else if (USE_GOOGLE_LOGIN) {
+      console.warn('Google login can only be used with Firebase');
+    }
+
+    // Initialize the speaker with the guide's audio.
+    const speaker = $('#audio-controls')[0];
+    speaker.src = `../testdata/${args['audio']}`;
+
+    // Keep track of the annotation time. Time is money!
+    // Phase 0: instruction reading.
+    // Phase 1: navigation.
+    // Phase 2: file upload.
+    const startTime = performance.now();
+    let stopTime0;
+    let stopTime1;
+    let stopTime2;
+
+    // Initialize the environment from the args.
+    const adapter = new pangea.Matterport3D('../symdata');
+    const env = await adapter.getNavigator(args.scan, $('#env-canvas')[0]);
+    env.setPanorama(args.path[0]);
+    // Initial elevation is always 0.
+    env.camera.rotation.copy(adapter.convertRotation(args.heading, 0));
+    // Fix the aspect ratio.
+    env.camera.aspect = env.canvas.width / env.canvas.height;
+    env.camera.updateProjectionMatrix();
+    // Prevent the user from seeing the poles.
+    env.controls.maxPolarAngle = Math.PI * 5 / 6;
+    env.controls.minPolarAngle = Math.PI * 1 / 6;
+
+    const snapshots = [];
+    const record = new pangea.Animation(() => {
+      env.update();
+      snapshots.push(
+        {...env.getSnapshot(), time: record.elapsedTime, audio: speaker.currentTime * 1000});
+    });
+
+    // Phase 0 to 1.
+    $('#begin-button').on('click', () => {
+      $('#inst-tab').fadeOut().promise().done(() => {
+        $('#nav-tab').fadeIn();
+      });
+      stopTime0 = performance.now();
+    });
+
+    // Enable submission and navigion once audio starts.
+    $(speaker).one('play', () => {
+      $('#submit-button').attr('disabled', false);
+      $('#env-blocker').fadeOut();
+      record.start();
+    })
+
+    // Use esc to play and pause the speaker.
+    $(document).on('keydown', (e) => {
+      (speaker.paused) ? speaker.play() : speaker.pause();
+    });
+
+    $('#reload-button').on('click', () => {
+      if (confirm('Reload the plugin?')) {
+        location.reload();
+      }
+    });
+
+    $('#submit-button').on('click', async () => {
+      if (confirm('Are you ready to submit?')) {
+        $('#reload-button').attr('disabled', true);
+        $('#submit-button').attr('disabled', true);
+        record.stop();
+        stopTime1 = performance.now();
+
+        $('#upload-prog-flag').fadeIn();
+        if (USE_FIREBASE) {
+          // Wait for uploads to finish.
+          await uploadBlob(
+            `${args['path_id']}/follower/snapshots.jsonl`, pangea.getJSONLines(snapshots), true);
+        } else {
+          // Pretend to upload something. To submit to a different datastore, add logic here.
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        $('#upload-prog-flag').fadeOut().promise().done(() => {
+          $('#upload-done-flag').fadeIn();
+        });
+
+        stopTime2 = performance.now();
+        const answer = {
+          args,
+          user,
+          startTime,
+          stopTime0,
+          stopTime1,
+          stopTime2,
+          totalTime: stopTime2 - startTime,
+        };
+        if (USE_FIREBASE) {
+          // Submit your answer to the database.
+          const ref = firebase.firestore().collection(FIRESTORE_COLLECTION).doc(args['path_id']);
+          if ((await ref.get()).exists && !confirm('Overwrite existing answer?')) {
+            throw new Error(`Document ${FIRESTORE_COLLECTION}/${args['path_id']} already exists`);
+          }
+          await ref.set(answer);
+        } else {
+          // Pretend to submit something. To submit to a different datastore, add logic here.
+          console.log('Submit answer', answer);
+        }
+      }
+    });
+  }
+
+  main();
+</script>

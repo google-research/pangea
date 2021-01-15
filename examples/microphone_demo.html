@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<!--
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+<meta charset="utf-8">
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js"></script>
+  <link rel="stylesheet" href="../src/style.css">
+</head>
+<body style="width: 50%;">
+  <h3>Microphone demo</h3>
+  <p>
+    This example demonstrates visualizing the microphone input, recording audio, and replaying the
+    recorded audio.
+  </p>
+  <ul>
+    <li>Select the visualization type; either RMS Meter or Frequency Histogram.</li>
+    <li>Press the "Start Recording" button to begin recording audio.</li>
+    <li>Press the "Stop Recording" button to replay the recorded audio.</li>
+  </ul>
+  <select id="vis-select">
+    <option value="rms-meter" selected>RMS Meter</option>
+    <option value="histogram">Frequency Histogram</option>
+  </select>
+  <br>
+  <canvas id="vis-canvas" width="200" height="10" style="border: 1px solid #000000;"></canvas>
+  <br>
+  <button id="start-button">Start Recording</button>
+  <button id="stop-button" disabled>Stop Recording</button>
+</body>
+<script type="module">
+  import * as pangea from '../src/index.js';
+
+  function main() {
+    let mic;
+
+    $('#vis-select').on('change', () => {
+      mic = new pangea.Microphone(
+        ($('#vis-select').val() === 'rms-meter') ?
+            new pangea.RmsMeter($('#vis-canvas')[0]) :
+            new pangea.Histogram($('#vis-canvas')[0]));
+    }).trigger('change');
+
+    $('#start-button').on('click', () => {
+      $('#vis-select').attr('disabled', true);
+      $('#start-button').attr('disabled', true);
+      $('#stop-button').attr('disabled', false);
+      mic.visualizer.fgColor = '#00ff00';
+      mic.start();
+    });
+
+    $('#stop-button').on('click', async () => {
+      $('#stop-button').attr('disabled', true);
+      mic.visualizer.fgColor = '#ffff00';
+      mic.stop();
+      const audio = new Audio(URL.createObjectURL(await mic.dump()));
+      audio.play();
+      $(audio).on('ended', () => {
+        $('#vis-select').attr('disabled', false);
+        $('#start-button').attr('disabled', false);
+      });
+      mic.reset();
+    });
+  }
+
+  main();
+</script>

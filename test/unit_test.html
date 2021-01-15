@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<!--
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+<meta charset="utf-8">
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <link rel="stylesheet" href="../src/style.css">
+</head>
+<body style="width: 50%; font-family: sans-serif"></body>
+<script type="module">
+  import * as pangea from '../src/index.js';
+
+  function getCameraUp(camera, target) {
+    camera.updateMatrixWorld(true);
+    const e = camera.matrixWorld.elements;
+    return target.set(e[4], e[5], e[6]).normalize();
+  }
+
+  function assertClose(a, b, epsilon = 0.0001) {
+    if (Math.abs(a - b) > epsilon) {
+      throw new Error(`Not close: ${a}, ${b}`);
+    }
+  }
+
+  function assertCloseVector3(a, b, epsilon = 0.0001) {
+    assertClose(a.x, b.x, epsilon);
+    assertClose(a.y, b.y, epsilon);
+    assertClose(a.z, b.z, epsilon);
+  }
+
+  // Unit tests.
+  const tests = {
+    /**
+     * Tests if dependencies are loaded.
+     */
+    testDependencies: () => {
+      // Check if cross-product works.
+      const axis0 = new THREE.Vector3(1, 0, 0);
+      const axis1 = new THREE.Vector3(0, 1, 0);
+      const axis2 = new THREE.Vector3().crossVectors(axis0, axis1);
+      assertCloseVector3(axis2, new THREE.Vector3(0, 0, 1));
+
+      // Check if orbit-controls works.
+      const camera = new THREE.PerspectiveCamera();
+      const renderer = new THREE.WebGLRenderer();
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      assertCloseVector3(controls.target, new THREE.Vector3(0, 0, 0));
+    },
+    /**
+     * Tests if environment initializes with correct coordinates.
+     */
+    testEnvironmentInit: () => {
+      const env = new pangea.Environment([], new THREE.SphereGeometry(100));
+      const look = env.camera.getWorldDirection(new THREE.Vector3());
+      const up = getCameraUp(env.camera, new THREE.Vector3());
+      assertCloseVector3(look, new THREE.Vector3(0, 0, -1));
+      assertCloseVector3(up, new THREE.Vector3(0, 1, 0));
+    },
+    /**
+     * Tests if the Matterport3D angle adapters are correct.
+     */
+    testMatterport3DAngles: () => {
+      const adapter = new pangea.Matterport3D();
+      // Random heading and elevation angles.
+      for (let i = 0; i < 100; i++) {
+        const randomHeading = Math.random() * Math.PI * 2 - Math.PI;
+        const randomElevation = Math.random() * Math.PI - Math.PI / 2;
+        const rotation = adapter.convertRotation(randomHeading, randomElevation);
+        const [heading, elevation] = adapter.revertRotation(rotation);
+        assertClose(heading, randomHeading);
+        assertClose(elevation, randomElevation);
+      }
+      // Methodical rotations in an environment.
+      const env = new pangea.Environment([], new THREE.SphereGeometry(100));
+      const look = new THREE.Vector3();
+      const up = new THREE.Vector3();
+
+      // Turn right 90 degrees.
+      env.camera.rotation.copy(adapter.convertRotation(Math.PI / 2, 0));
+      env.camera.getWorldDirection(look);
+      getCameraUp(env.camera, up);
+      assertCloseVector3(look, new THREE.Vector3(1, 0, 0));
+      assertCloseVector3(up, new THREE.Vector3(0, 1, 0));
+
+      // Look up 30 degrees.
+      env.camera.rotation.copy(adapter.convertRotation(0, Math.PI / 6));
+      env.camera.getWorldDirection(look);
+      getCameraUp(env.camera, up);
+      assertCloseVector3(look, new THREE.Vector3(0, 0.5, -Math.sqrt(3) / 2));
+      assertCloseVector3(up, new THREE.Vector3(0, Math.sqrt(3) / 2, 0.5));
+
+      // Turn 180 dedrees and look down 30 degrees to check rotation order.
+      env.camera.rotation.copy(adapter.convertRotation(Math.PI, -Math.PI / 6));
+      env.camera.getWorldDirection(look);
+      getCameraUp(env.camera, up);
+      assertCloseVector3(look, new THREE.Vector3(0, -0.5, Math.sqrt(3) / 2));
+      assertCloseVector3(up, new THREE.Vector3(0, Math.sqrt(3) / 2, 0.5));
+    },
+    /**
+     * Tests the navigator's mouse and cursor.
+     */
+    testNavigatorMouse: async () => {
+      const env = new pangea.Navigator(
+          [{
+            id: 'test',
+            exmat: new THREE.Matrix4(),
+            materials: [new THREE.MeshBasicMaterial()],
+            navigable: [],
+          }],
+          new THREE.SphereGeometry(100));
+      env.setPanorama('test');
+
+      // Square aspect with a 60 degree field-of-view.
+      env.camera.fov = 60;
+      env.camera.aspect = 1;
+      env.camera.updateProjectionMatrix();
+
+      // Move mouse to center.
+      env.mouse.set(0, 0);
+      env.update();
+      assertCloseVector3(
+          env.raycaster.ray.direction, new THREE.Vector3(0, 0, -1));
+
+      // Move mouse to left.
+      env.mouse.set(-1, 0);
+      env.update();
+      assertCloseVector3(
+          env.raycaster.ray.direction,
+          new THREE.Vector3(-0.5, 0, -Math.sqrt(3) / 2));
+
+      // Rotate camera left 90 degrees, move mouse to center.
+      env.camera.rotation.set(0, Math.PI / 2, 0);
+      env.mouse.set(0, 0);
+      env.update();
+      assertCloseVector3(
+          env.raycaster.ray.direction, new THREE.Vector3(-1, 0, 0));
+
+      // Rotate camera up 30 degrees, move mouse to bottom.
+      env.camera.rotation.set(Math.PI / 6, 0, 0);
+      env.mouse.set(0, -1);
+      env.update();
+      assertCloseVector3(
+          env.raycaster.ray.direction, new THREE.Vector3(0, 0, -1));
+
+      // Rotate camera left 90 degrees and up 30 degrees, move mouse to center.
+      env.camera.rotation.set(Math.PI / 6, Math.PI / 2, 0);
+      env.mouse.set(0, 0);
+      env.update();
+      assertCloseVector3(
+          env.raycaster.ray.direction, new THREE.Vector3(-1, 0, 0));
+    }
+  };
+
+  // Run all tests.
+  Object.entries(tests).forEach(async ([name, test]) => {
+    try {
+      await test();
+      console.log(`Testing ${name}: %cPASSED`, 'background: #00ff00');
+      $('body').append(`<p>Testing ${name}: <span style="background: #00ff00">PASSED</span></p>`);
+    } catch (error) {
+      console.log(`Testing ${name}: \%cFAILED\n`, 'background: #ff0000', error);
+      $('body').append(`<p>Testing ${name}: <span style="background: #ff0000">FAILED</span></p>`);
+      $('body').append(`<small>Check the console for logs</small>`);
+    }
+  });
+</script>

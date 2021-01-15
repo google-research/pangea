@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<!--
+Copyright 2021 Google LLC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+<meta charset="utf-8">
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.0/jquery.min.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-app.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-auth.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-firestore.js"></script>
+  <script src="https://gstatic.com/firebasejs/7.13.1/firebase-storage.js"></script>
+  <script src="https://gstatic.com/inputtools/js/ita/inputtools_3.js"></script>
+  <link rel="stylesheet" href="../src/style.css">
+</head>
+<body style="margin: auto; width: 50%;">
+  <div id="inst-tab">
+    <h2>Instructions</h2>
+    <div id="external-inst"></div><script>$('#external-inst').load('guide_instructions.html');</script>
+    <button id="begin-button">Begin</button>
+  </div>
+  <div id="nav-tab" style="display: none;">
+    <p>Microphone volume:</p>
+    <canvas id="mic-canvas" width="200" height="10" style="border: 1px solid #000000;"></canvas>
+    <br>
+    <br>
+    <button id="start-button">Start</button>
+    <button id="pause-button" disabled>Pause</button>
+    <button id="transcribe-button" disabled>Transcribe</button>
+    <br>
+    <br>
+    <div id="env-div" style="width: 1000px; height: 500px;">
+      <div id="env-blocker" style="position: absolute; z-index: 1; width: 1000px; height: 500px; background-color: rgba(0,0,0,0.5);"></div>
+      <canvas id="env-canvas" width="1000px" height="500px" style="position: absolute; z-index: 0; width: 1000px; height: 500px;"></canvas>
+    </div>
+  </div>
+  <br>
+  <div id="transcribe-tab" style="display: none;">
+    <audio controls id="audio-controls" style="width: 1000px;"></audio>
+    <p>Please transcribe your audio in <span id="lang-str"></span></p>
+    <small>
+      Please include any disfluencies and filler words you used (e.g., "I think", "alright", and
+      "turn left... I mean right") but not filler sounds (e.g., "um", "uh", and "er"). Please
+      separate the text into multiple sentences and use punctuation. Press the submit button when
+      you are done.
+    </small>
+    <br>
+    <br>
+    <textarea id="transcribe-input" class="form-control" spellcheck="true" style="width: 1000px; height: 50px; resize: vertical;"></textarea>
+    <button id="transcribe-controls" style="display: none;"></button>
+    <br>
+    <br>
+    <button id="reload-button">Reload</button>
+    <button id="submit-button" disabled>Submit</button>
+    <p id="upload-prog-flag" style="display: none;">Uploading in the background...</p>
+    <p id="upload-done-flag" style="display: none;">Upload complete</p>
+  </div>
+</body>
+<script type="module">
+  import * as pangea from '../src/index.js';
+  import {doGoogleLogin, uploadBlob} from '../src/firebase.js';
+
+  // Find your app config here: https://console.firebase.google.com
+  const FIREBASE_APP_CONFIG = {};
+  const FIRESTORE_COLLECTION = '';
+  const USE_FIREBASE = false;
+  const USE_GOOGLE_LOGIN = true;
+
+  async function main() {
+    // Args provided by your crowdsourcing service.
+    const args = await $.getJSON('../testdata/args.json');
+
+    let user;
+    if (USE_FIREBASE) {
+      // Firebase app initialization.
+      firebase.initializeApp(FIREBASE_APP_CONFIG);
+      if (USE_GOOGLE_LOGIN) {
+        user = await doGoogleLogin();
+      }
+    } else if (USE_GOOGLE_LOGIN) {
+      console.warn('Google login can only be used with Firebase');
+    }
+
+    // Multilingual transcription support.
+    const inputController = new google.elements.inputtools.InputToolsController();
+    inputController.addPageElements(['transcribe-input']);
+    const inputToolCodeNS = google.elements.inputtools.InputToolCode;
+    if (args.language.startsWith('en')) {
+      $('#lang-str').html('English');
+    } else {
+      $('#transcribe-controls').show();
+      // Add non-English input controls for Hindi and Telugu.
+      if (args.language.startsWith('hi')) {
+        $('#lang-str').html('Hindi');
+        inputController.addInputTools([
+          inputToolCodeNS.INPUTMETHOD_TRANSLITERATION_HINDI,
+          inputToolCodeNS.KEYBOARD_HINDI,
+          inputToolCodeNS.KEYBOARD_HINDI_PHONETIC,
+        ]);
+        inputController.activateInputTool(inputToolCodeNS.INPUTMETHOD_TRANSLITERATION_HINDI);
+      } else if (args.language.startsWith('te')){
+        $('#lang-str').html('Telugu');
+        inputController.addInputTools([
+          inputToolCodeNS.INPUTMETHOD_TRANSLITERATION_TELUGU,
+          inputToolCodeNS.KEYBOARD_TELUGU_INSCRIPT,
+          inputToolCodeNS.KEYBOARD_TELUGU_PHONETIC,
+        ]);
+        inputController.activateInputTool(inputToolCodeNS.INPUTMETHOD_TRANSLITERATION_TELUGU);
+      } else {
+        throw new Error(`Unsupported language ${args.language}`);
+      }
+      inputController.showControl({
+        container: 'transcribe-controls',
+        inputElement: 'transcribe-input'
+      });
+    }
+
+    // Keep track of the annotation time.
+    // Phase 0: instruction reading.
+    // Phase 1: navigation.
+    // Phase 2: transcription.
+    const startTime = performance.now();
+    let stopTime0;
+    let stopTime1;
+    let stopTime2;
+
+    // Initialize the environment from the args.
+    const adapter = new pangea.Matterport3D('../symdata');
+    const env = await adapter.getNavigator(args.scan, $('#env-canvas')[0]);
+    await env.setPanorama(args.path[0]);
+    // Initial elevation is always 0.
+    env.camera.rotation.copy(adapter.convertRotation(args.heading, 0));
+    // Fix the aspect ratio.
+    env.camera.aspect = env.canvas.width / env.canvas.height;
+    env.camera.updateProjectionMatrix();
+    // Prevent the user from seeing the poles.
+    env.controls.maxPolarAngle = Math.PI * 5 / 6;
+    env.controls.minPolarAngle = Math.PI * 1 / 6;
+
+    // Draw the path from the args.
+    env.scene.add(new THREE.AmbientLight());
+    env.scene.add(new THREE.DirectionalLight());
+    const points = args.path.map(env.getCurpos.bind(env));
+    const drawing = new pangea.LineDrawing(env, points, ['#0000ff', '#ff0000']);
+
+    // Green arrow to indicate initial heading.
+    const direction = env.camera.getWorldDirection(new THREE.Vector3());
+    const arrow = new THREE.ArrowHelper(direction, new THREE.Vector3(), 0.3, '#00ff00', 0, 0);
+    drawing.children[0].add(arrow);
+
+    // Green halo to indicate goal position.
+    const halo = new THREE.Points(
+        new THREE.Geometry().setFromPoints([new THREE.Vector3()]),
+        new THREE.PointsMaterial({color: '#00ff00', size: 0.3}));
+    drawing.children[drawing.children.length - 1].add(halo);
+
+    const snapshots = [];
+    const record = new pangea.Animation(() => {
+      env.update();
+      drawing.update();
+      snapshots.push({...env.getSnapshot(), time: record.elapsedTime});
+    });
+
+    // Initialize the microphone and speaker.
+    const mic =
+        new pangea.Microphone(new pangea.RmsMeter($('#mic-canvas')[0], '#000000', '#ffff00'));
+    const speaker = $('#audio-controls')[0];
+
+    // Phase 0 to 1.
+    $('#begin-button').on('click', () => {
+      $('#inst-tab').fadeOut().promise().done(() => {
+        $('#nav-tab').fadeIn();
+      });
+      stopTime0 = performance.now();
+    });
+
+    // Whether the environment is interactive during phase 1.
+    let recording = false;
+
+    $('#start-button').on('click', () => {
+      $('#start-button').attr('disabled', true);
+      $('#pause-button').attr('disabled', false);
+      $('#transcribe-button').attr('disabled', true);
+      $('#env-blocker').fadeOut();
+      env.controls.enabled = true;
+      record.start();
+      mic.start();
+      mic.visualizer.fgColor = '#00ff00';
+      recording = true;
+    });
+
+    $('#pause-button').on('click', () => {
+      $('#start-button').attr('disabled', false);
+      $('#pause-button').attr('disabled', true);
+      $('#transcribe-button').attr('disabled', false);
+      $('#env-blocker').fadeIn();
+      env.controls.enabled = false;
+      record.stop();
+      mic.stop();
+      mic.visualizer.fgColor = '#ffff00';
+      recording = false;
+    });
+
+    // Use esc to play and pause the environment (phase 0) and speaker (phase 1).
+    $(document).on('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if ($('#transcribe-tab').is(':hidden')) {
+          (recording) ? $('#pause-button')[0].click() : $('#start-button')[0].click();
+        } else if ($('#transcribe-tab').is(':visible')) {
+          (speaker.paused) ? speaker.play() : speaker.pause();
+        }
+      }
+    });
+
+    $('#reload-button').on('click', () => {
+      if (confirm('Reload the plugin?')) {
+        location.reload();
+      }
+    });
+
+    // Phase 1 to 2.
+    $('#transcribe-button').on('click', async () => {
+      if (confirm('Proceed to transcription?')) {
+        $('#start-button').attr('disabled', true);
+        $('#pause-button').attr('disabled', true);
+        $('#transcribe-button').attr('disabled', true);
+        $('#transcribe-tab').fadeIn();
+        mic.visualizer.fgColor = '#000000';
+        stopTime1 = performance.now();
+
+        // Synchronize snapshots and speaker.
+        const wav = await mic.dump();
+        speaker.src = URL.createObjectURL(wav);
+        new pangea.Animation(() => {
+          const snapshot = pangea.keymin(snapshots, (snapshot) => {
+            return Math.abs(snapshot.time - speaker.currentTime * 1000);
+          });
+          env.setSnapshot(snapshot);
+          env.update();
+          drawing.update();
+        }).start();
+
+        $('#upload-prog-flag').fadeIn();
+        if (USE_FIREBASE) {
+          // Wait for uploads to finish.
+          await Promise.all(
+            uploadBlob(`${args['path_id']}/guide/snapshots.jsonl`, pangea.getJSONLines(snapshots), true),
+            uploadBlob(`${args['path_id']}/guide/audio.wav`, wav, true));
+        } else {
+          // Pretend to upload something. To submit to a different datastore, add logic here.
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        $('#upload-prog-flag').fadeOut().promise().done(() => {
+          $('#upload-done-flag').fadeIn();
+        });
+
+        $('#submit-button').attr('disabled', false);
+        $('#submit-button').on('click', async () => {
+          if (confirm('Are you ready to submit?')) {
+            $('#transcribe-input').attr('disabled', true);
+            $('#reload-button').attr('disabled', true);
+            $('#submit-button').attr('disabled', true);
+            stopTime2 = performance.now();
+            const answer = {
+              args,
+              user,
+              transcript: $('#transcribe-input').val(),
+              startTime,
+              stopTime0,
+              stopTime1,
+              stopTime2,
+              totalTime: stopTime2 - startTime,
+            };
+            if (USE_FIREBASE) {
+              // Submit your answer to the database.
+              const ref =
+                    firebase.firestore().collection(FIRESTORE_COLLECTION).doc(args['path_id']);
+              if ((await ref.get()).exists && !confirm('Overwrite existing answer?')) {
+                throw new Error(
+                  `Document ${FIRESTORE_COLLECTION}/${args['path_id']} already exists`);
+              }
+              await ref.set(answer);
+            } else {
+              // Pretend to submit something. To submit to a different datastore, add logic here.
+              console.log('Submit answer', answer);
+            }
+          }
+        });
+      }
+    });
+  }
+
+  main();
+</script>
