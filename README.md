@@ -1,10 +1,10 @@
-# Pangea
+# PanGEA
 
-The Panoramic Graph Environment Annotation toolkit, abbreviated as Pangea, is a
+The Panoramic Graph Environment Annotation toolkit, abbreviated as PanGEA, is a
 lightweight and customizable codebase for collecting audio and text
 annotations in panoramic graph environments, such as
 [Matterport3D](https://niessner.github.io/Matterport/) and
-[StreetLearn](https://sites.google.com/corp/view/streetlearn). Pangea has been
+[StreetLearn](https://sites.google.com/corp/view/streetlearn). PanGEA has been
 used to collect the
 [RxR dataset](https://github.com/google-research-datasets/RxR) of multilingual
 navigation instructions, and to perform human wayfinding evaluations of
@@ -27,72 +27,127 @@ The `src` directory contains the core components used to create a plugin.
     [Web Audio API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
     as well as an `RmsMeter` and `Histogram` class to visualize the audio
     stream.
-*   `drawing.js` contains the `Line` class which renders a line in an
+*   `drawing.js` contains the `LineDrawing` class which renders a line in an
     environment. This is useful for rendering paths to be annotated.
 *   `firebase.js` contains Firebase upload related utilities.
 *   `utils.js` contains common utility functions.
-*   `examples.js` contains misc utility functions use by the examples below. The
-    `Matterport3D` class is a data adapter for the Matterport3D environment.
+*   `data_adapter.js` contains code for loading Matterport3D environments.
 
-The `examples` directory contains examples of Pangea in action.
+The `examples` directory contains examples of PanGEA in action.
 
 *   `environment_demo.html` demonstrates loading a navigator, recording a pose
-    trace, and replaying the recorded pose trace.
+    trace, and replaying the recorded pose trace. A pose trace is a timestamped
+    sequence of camera poses that captures everything the annotator sees.
 *   `microphone_demo.html` demonstrates recording audio from the microphone.
 *   `guide_plugin.html` is the Guide plugin for an RxR annotation task.
 *   `follower_plugin.html` is the Follower plugin for an RxR annotation task.
 
-The `environment_demo.html` and `microphone_demo.html` examples are
-self-contained and don't require downloading any additional data. Just launch a
-local server to see them.
+The `environment_demo.html` and `microphone_demo.html` pages are minimal
+self-contained examples that don't require downloading any additional data. Just
+launch a local server to see them, e.g.
 
 ```bash
 python3 -m http.server 8000
 ```
 
-We'll provide recipes for `guide_plugin.html` and `follower_plugin.html` which
-require the Matterport3D environment.
+and browse to
+
+```bash
+http://localhost:8000/examples/environment_demo.html
+http://localhost:8000/examples/microphone_demo.html
+```
+
+The `guide_plugin.html` and `follower_plugin.html` pages require a dataset to
+work, as described below.
 
 ## Guide and Follower plugins
 
-The Guide and Follower plugins are used to collect the
+The Guide and Follower plugins were used to collect the
 [RxR dataset](https://github.com/google-research-datasets/RxR) of multilingual
-navigation instructions in the Matterport3D environment.
+navigation instructions in the Matterport3D environment. Both plugins can be
+configured to save annotation outputs to [Firebase](https://firebase.google.com/).
 
-During the Guide phase, annotators are given a path in the environment. Their
+### Guide Task
+
+In the Guide task, annotators are given a path in the environment. Their
 voice is recorded as they freely move along the path and attempt to generate
 spoken navigation instructions others can follow. After they're satisfied with
 their instructions, they'll be asked to manually transcribe their own voice
-recording into text, similar to
-[Localized Narratives](https://google.github.io/localized-narratives/).
+recording into text.
 
-During the Follower phase, annotators begins at the start of an unknown path and
-try to follow the Guide’s instruction. They observe the environment and navigate
+Input Args (currently loaded from `testdata/args.json`):
+
+- language: currently supports English, Hindi or Telugu. Used to configure
+[Google Input Tools](https://www.google.com/inputtools/) in the transcription
+step
+- scan: environment identifer
+- path: sequence of viewpoint ids indicating the path to be annotated
+- heading: starting heading
+- path_id: your path identifier
+
+Outputs:
+
+- a pose trace (timestamped virtual camera poses, capturing the annotator's
+movements and everything they see along the path)
+- the audio file of the annotator's voice recording, and
+- the annotator's manual transcript of their voice recording.
+
+### Follower Task
+
+In the Follower task, annotators begins at the start of an unknown path and
+try to follow a Guide’s instruction. They observe the environment and navigate
 in the simulator as the Guide’s audio plays. Once they believe they have reached
 the the end of the path, or give up, they indicate they are done.
 
+Input Args (currently loaded from `testdata/args.json`):
+
+- audio: path to a Guide's audio recording
+- scan: environment identifer
+- path: a sequence of viewpoint ids (annotator starts at the first viewpoint)
+- heading: starting heading
+- path_id: your path identifier
+
+Outputs:
+
+- a pose trace (timestamped virtual camera poses, capturing the annotator's
+movements and everything they see along the path)
+
+### Post-Processing
+
+In the RxR dataset, all words in the manually-transcribed navigation
+instructions are timestamped and aligned with both the Guide and Follower pose
+traces. In a future release we will provide tooling to perform this alignment
+automatically following the same approach as
+[Localized Narratives](https://google.github.io/localized-narratives/).
+
 ### Running locally
 
-In order to simulate an environment, Pangea needs to access the raw panoramic
-data. You can download the Matterport3D panoramas
-[here](https://niessner.github.io/Matterport/) and the navigation graphs
+In order to simulate an environment, PanGEA requires a dataset of 360-degree
+panoramic images, plus navigation graphs encoding the position of these
+viewpoints and the navigable connections between them. To use the Matterport3D
+dataset, download the Matterport3D skybox images from
+[here](https://niessner.github.io/Matterport/) and the navigation graphs from
 [here](https://github.com/peteanderson80/Matterport3DSimulator/tree/master/connectivity).
-Please note that the Matterport3D data are governed by the following
-[Terms of Use](http://kaldir.vc.in.tum.de/matterport/MP_TOS.pdf).
+Please note that the Matterport3D data is governed by the following
+[Terms of Use](http://kaldir.vc.in.tum.de/matterport/MP_TOS.pdf). Alternatively,
+a different dataset such as StreetLearn could be used by writing a new
+dataloader class in `data_adapter.js`.
+
+Assuming the data is saved in a directory as follows:
 
 ```bash
 <data_dir>/data/v1/scans/<scan_id>/matterport_skybox_images/<pano_id>_skybox<face_id>_sami.jpg
 <data_dir>/connectivity/<scan_id>_connectivity.json
 ```
 
-Create a symlink to the data and kick off a local server.
+create a symlink to the data and start a local server
 
 ```bash
 ln -s <data_dir> symdata
 python3 -m http.server 8000
 ```
 
-Check out an example!
+then browse to
 
 ```bash
 http://localhost:8000/examples/guide_plugin.html
@@ -101,30 +156,37 @@ http://localhost:8000/examples/follower_plugin.html
 
 ### Deploying remotely
 
-To deploy a plugin remotely you'll need to host your data on a
-[Google Cloud Storage bucket](https://cloud.google.com/storage/).
+
+#### Environment data hosting
+
+To deploy a plugin remotely (i.e., for a genuine data collection effort), you'll
+need to host your environment data and javascript on a
+[Google Cloud Storage bucket](https://cloud.google.com/storage/). The
+environment data file paths should be as follows:
 
 ```bash
 gs://<bucket_id>/data/v1/scans/<scan_id>/matterport_skybox_images/<pano_id>_skybox<face_id>_sami.jpg
 gs://<bucket_id>/connectivity/<scan_id>_connectivity.json
 ```
 
-Swap out the `Matterport3D` function's `root` argument from `../symdata` to
-`https://storage.googleapis.com/<bucket_id>`.
+In `guide_plugin.html` and `follower_plugin.html`, swap the argument to the
+`Matterport3D` function from `../symdata` to
+`https://storage.googleapis.com/<bucket_id>`, and update the javascript urls
+beginning with `../src/` to point to the new location in your bucket.
 
 Don't forget to grant your plugin
 [read access](https://cloud.google.com/storage/docs/access-control) and
 [enable CORS](https://cloud.google.com/storage/docs/configuring-cors).
 
-### Firebase integration
+#### Firebase integration
 
-Generally speaking, when you deploy a plugin, you'll want to set up (1) a
-storage bucket to upload raw annotations (e.g., speech recordings) to and (2) a
-database to store and organize the metadata (e.g., info about the annotator).
-Here's a recipe for how to create both using
+The Guide and Follower plugins are setup to use (1) a storage bucket to upload
+raw annotations (e.g., speech recordings and pose traces), and (2) a database to
+store and organize additional metadata (e.g., audio transcriptions). Both are
+setup using
 [Firebase](https://firebase.google.com/).
 
-*   First you'll want to create an app from the
+*   First, create an app from the
     [console](https://console.firebase.google.com/).
 *   Go to the Storage tab and add a bucket. This can either be the same bucket
     used to host your data or a brand new one. We recommend the latter. Don't
@@ -152,17 +214,17 @@ Your app config should look something like this:
 ```javascript
  {
   apiKey: "AIza....",                             // Auth / General Use
-  appId: "1:27992087142:web:ce....",      // General Use
+  appId: "1:27992087142:web:ce....",              // General Use
   projectId: "my-firebase-project",               // General Use
   authDomain: "YOUR_APP.firebaseapp.com",         // Auth with popup/redirect
   databaseURL: "https://YOUR_APP.firebaseio.com", // Realtime Database
   storageBucket: "YOUR_APP.appspot.com",          // Storage
-  messagingSenderId: "123456789",                  // Cloud Messaging
+  messagingSenderId: "123456789",                 // Cloud Messaging
   measurementId: "G-12345"                        // Analytics
 }
 ```
 
-### Crowdsourcing platform
+#### Crowdsourcing platform
 
 Integration with crowdsourcing platforms (e.g., Amazon Mechanical Turk) is left
 to the user. Currently, both `examples/guide_plugin.html` and
