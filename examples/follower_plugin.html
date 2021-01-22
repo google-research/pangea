@@ -45,8 +45,8 @@ limitations under the License.
     <br>
     <button id="reload-button">Reload</button>
     <button id="submit-button" disabled>Submit</button>
-    <p id="upload-prog-flag" style="display: none;">Uploading in the background...</p>
-    <p id="upload-done-flag" style="display: none;">Upload complete</p>
+    <p id="upload-prog-flag" style="display: none;">Submitting your annotation...</p>
+    <p id="upload-done-flag" style="display: none;">Submitting complete</p>
   </div>
 </body>
 <script type="module">
@@ -140,7 +140,6 @@ limitations under the License.
         record.stop();
         stopTime1 = performance.now();
 
-        $('#upload-prog-flag').fadeIn();
         if (USE_FIREBASE) {
           // Wait for uploads to finish.
           await uploadBlob(
@@ -149,9 +148,6 @@ limitations under the License.
           // Pretend to upload something. To submit to a different datastore, add logic here.
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
-        $('#upload-prog-flag').fadeOut().promise().done(() => {
-          $('#upload-done-flag').fadeIn();
-        });
 
         stopTime2 = performance.now();
         const answer = {
@@ -163,6 +159,7 @@ limitations under the License.
           stopTime2,
           totalTime: stopTime2 - startTime,
         };
+        $('#upload-prog-flag').fadeIn();
         if (USE_FIREBASE) {
           // Submit your answer to the database.
           const ref = firebase.firestore().collection(FIRESTORE_COLLECTION).doc(args['path_id']);
@@ -174,6 +171,9 @@ limitations under the License.
           // Pretend to submit something. To submit to a different datastore, add logic here.
           console.log('Submit answer', answer);
         }
+        $('#upload-prog-flag').fadeOut().promise().done(() => {
+          $('#upload-done-flag').fadeIn();
+        });
       }
     });
   }
