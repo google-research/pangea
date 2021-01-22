@@ -221,6 +221,44 @@ export class Environment {
   }
 
   /**
+   * Prunes the given panos from the environment.
+   * @param {!Array<!Panorama>} ids Panoramas to prune.
+   */
+  prunePanoramas(ids) {
+    if (ids.includes(this.sourceId)) {
+      throw new Error('Cannot prune the current pano');
+    }
+    this.panos = this.panos.flatMap((pano) => {
+      if (ids.includes(pano.id)) {
+        return [];
+      } else {
+        if (pano.navigable) {
+          pano.navigable = pano.navigable.flatMap((id) => {
+            return (ids.includes(id)) ? [] : [id];
+          });
+        }
+        if (pano.visible) {
+          pano.visible = pano.visible.flatMap((id) => {
+            return (ids.includes(id)) ? [] : [id];
+          });
+        }
+        return [pano];
+      }
+    });
+  }
+
+  /**
+   * Prunes all but the given panos from the environment.
+   * @param {!Array<!Panorama>} ids Panoramas to keep.
+   */
+  keepPanoramas(ids) {
+    const complement = this.panos.flatMap((pano) => {
+      return (ids.includes(pano.id)) ? [] : [pano.id];
+    });
+    this.prunePanoramas(complement);
+  }
+
+  /**
    * Sets the environment pano.
    * @param {string} id Panorama id.
    */

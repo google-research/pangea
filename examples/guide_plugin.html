@@ -76,6 +76,9 @@ limitations under the License.
   import * as pangea from '../src/index.js';
   import {doGoogleLogin, uploadBlob} from '../src/firebase.js';
 
+  // Whether to use RxR-style path markers.
+  const USE_LEGACY_DRAWING = true;
+
   // Find your app config here: https://console.firebase.google.com
   const FIREBASE_APP_CONFIG = {};
   const FIRESTORE_COLLECTION = '';
@@ -143,6 +146,8 @@ limitations under the License.
     // Initialize the environment from the args.
     const adapter = new pangea.Matterport3D('../symdata');
     const env = await adapter.getNavigator(args.scan, $('#env-canvas')[0]);
+    // Restrict user to the path.
+    env.keepPanoramas(args.path);
     await env.setPanorama(args.path[0]);
     // Initial elevation is always 0.
     env.camera.rotation.copy(adapter.convertRotation(args.heading, 0));
@@ -157,18 +162,30 @@ limitations under the License.
     env.scene.add(new THREE.AmbientLight());
     env.scene.add(new THREE.DirectionalLight());
     const points = args.path.map(env.getCurpos.bind(env));
-    const drawing = new pangea.LineDrawing(env, points, ['#0000ff', '#ff0000']);
 
-    // Green arrow to indicate initial heading.
-    const direction = env.camera.getWorldDirection(new THREE.Vector3());
-    const arrow = new THREE.ArrowHelper(direction, new THREE.Vector3(), 0.3, '#00ff00', 0, 0);
-    drawing.children[0].add(arrow);
-
-    // Green halo to indicate goal position.
-    const halo = new THREE.Points(
-        new THREE.Geometry().setFromPoints([new THREE.Vector3()]),
-        new THREE.PointsMaterial({color: '#00ff00', size: 0.3}));
-    drawing.children[drawing.children.length - 1].add(halo);
+    let drawing;
+    if (USE_LEGACY_DRAWING) {
+      // Legacy style path drawing used to collect the RxR dataset.
+      // A sequence of marbles with pulsating arrows.
+      drawing = new pangea.LegacyDrawing(env, points, ['#0000ff', '#ff0000']);
+      // Green arrow to indicate initial heading.
+      const direction = env.camera.getWorldDirection(new THREE.Vector3());
+      drawing.addArrow(0, direction, '#00ff00', 0.3, false);
+      // Green halo to indicate goal position.
+      drawing.addHalo(args.path.length - 1, '#00ff00');
+    } else {
+      // New (preferred) style path drawing. A continuous line between panos.
+      drawing = new pangea.LineDrawing(env, points, ['#0000ff', '#ff0000']);
+      // Green arrow to indicate initial heading.
+      const direction = env.camera.getWorldDirection(new THREE.Vector3());
+      const arrow = new THREE.ArrowHelper(direction, new THREE.Vector3(), 0.3, '#00ff00', 0, 0);
+      drawing.children[0].add(arrow);
+      // Green halo to indicate goal position.
+      const halo = new THREE.Points(
+          new THREE.Geometry().setFromPoints([new THREE.Vector3()]),
+          new THREE.PointsMaterial({color: '#00ff00', size: 0.3}));
+      drawing.children[drawing.children.length - 1].add(halo);
+    }
 
     const snapshots = [];
     const record = new pangea.Animation(() => {

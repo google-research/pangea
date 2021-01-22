@@ -20,7 +20,7 @@
 
 export {Animation} from './animation.js';
 export {Matterport3D} from './data_adapter.js';
-export {LineDrawing} from './drawing.js';
+export {LineDrawing, LegacyDrawing} from './drawing.js';
 export {Environment, Navigator} from './environment.js';
 export {Histogram, Microphone, RmsMeter} from './microphone.js';
 export {arange, argmin, getJSON, getJSONLines, keymin} from './utils.js';
