@@ -22,6 +22,7 @@ limitations under the License.
   <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
   <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
   <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <script src="https://www.gstatic.com/external_hosted/wavesurfer/wavesurfer_min.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-app.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-auth.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-firestore.js"></script>
@@ -32,18 +33,34 @@ limitations under the License.
   <div id="inst-tab">
     <h2>Instructions</h2>
     <div id="external-inst"></div><script>$('#external-inst').load('follower_instructions.html');</script>
-    <button id="begin-button">Begin</button>
+    <button id="begin-button" disabled>Begin</button>
   </div>
   <div id="nav-tab" style="display: none;">
-    <div id="env-div" style="width: 1000px; height: 500px;">
-      <div id="env-blocker" style="position: absolute; z-index: 1; width: 1000px; height: 500px; background-color: rgba(0,0,0,0.5);"></div>
-      <canvas id="env-canvas" width="1000px" height="500px" style="position: absolute; z-index: 0; width: 1000px; height: 500px;"></canvas>
+    <div id="env-div" style="width: 640px; height: 480px;">
+      <div id="env-blocker" style="position: absolute; z-index: 1; width: 640px; height: 480px; background-color: rgba(0,0,0,0.5);"></div>
+      <canvas id="env-canvas" width="640px" height="480px" style="position: absolute; z-index: 0; width: 640px; height: 480px;"></canvas>
     </div>
     <br>
-    <audio controls id="audio-controls" style="width: 1000px;"></audio>
+    <br>
+    <label for="playback-select">Playback speed:</label>
+    <select id="playback-select">
+      <option value="0.5">0.5x</option>
+      <option value="0.8">0.8x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.2">1.2x</option>
+      <option value="1.5">1.5x</option>
+    </select>
+    <br>
+    <small>Use the ESC key to play/pause the audio. ALT + left/right arrow key will skip the audio
+      backwards or forwards.</small>
     <br>
     <br>
-    <button id="reload-button">Reload</button>
+    <button id="playpause-button">Play</button>
+    <br>
+    <br>
+    <div id="waveform" style="width: 640px;"></div>
+    <br>
+    <button id="reload-button">Restart</button>
     <button id="submit-button" disabled>Submit</button>
     <p id="upload-prog-flag" style="display: none;">Submitting your annotation...</p>
     <p id="upload-done-flag" style="display: none;">Submitting complete</p>
@@ -74,9 +91,16 @@ limitations under the License.
       console.warn('Google login can only be used with Firebase');
     }
 
-    // Initialize the speaker with the guide's audio.
-    const speaker = $('#audio-controls')[0];
-    speaker.src = `../testdata/${args['audio']}`;
+    const speaker = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#A8DBA8',
+      progressColor: '#3B8686',
+      barHeight: 4,
+    });
+    speaker.on('ready', () => {
+      $('#begin-button').attr('disabled', false);
+    });
+    speaker.load(`../testdata/${args['audio']}`);
 
     // Keep track of the annotation time. Time is money!
     // Phase 0: instruction reading.
@@ -99,36 +123,71 @@ limitations under the License.
     // Prevent the user from seeing the poles.
     env.controls.maxPolarAngle = Math.PI * 5 / 6;
     env.controls.minPolarAngle = Math.PI * 1 / 6;
+    // Hyperparameters for the controls.
+    env.controls.panSpeed = 0.75;
+    env.controls.rotateSpeed = 0.75;
 
     const snapshots = [];
     const record = new pangea.Animation(() => {
       env.update();
       snapshots.push(
-        {...env.getSnapshot(), time: record.elapsedTime, audio: speaker.currentTime * 1000});
+        {...env.getSnapshot(), time: record.elapsedTime, audio: speaker.getCurrentTime() * 1000});
     });
 
     // Phase 0 to 1.
     $('#begin-button').on('click', () => {
       $('#inst-tab').fadeOut().promise().done(() => {
-        $('#nav-tab').fadeIn();
+        // All parent divs must be visible to draw the speaker waveform.
+        $('#nav-tab').fadeIn().promise().done(() => {
+          speaker.drawBuffer()
+          $('#playpause-button')[0].click();
+        });
       });
       stopTime0 = performance.now();
     });
 
     // Enable submission and navigion once audio starts.
-    $(speaker).one('play', () => {
+    speaker.once('play', () => {
       $('#submit-button').attr('disabled', false);
       $('#env-blocker').fadeOut();
       record.start();
     })
 
+    $('#playback-select').on('change', () => {
+      speaker.setPlaybackRate($('#playback-select option:selected').val());
+    });
+
+    $('#playpause-button').on('click', () => {
+      if (speaker.isPlaying()) {
+        speaker.pause()
+        $('#playpause-button').html('Play');
+      } else {
+        speaker.play();
+        $('#playpause-button').html('Pause');
+      }
+    });
+    speaker.on('finish', () => {
+      $('#playpause-button').html('Play');
+    });
+
     // Use esc to play and pause the speaker.
     $(document).on('keydown', (e) => {
-      (speaker.paused) ? speaker.play() : speaker.pause();
+      if (e.key === "Escape") {
+        $('#playpause-button')[0].click();
+      }
+      // ALT + Left or right arrows skip the audio by 2 seconds.
+      if (e.key === "ArrowLeft" && e.altKey) {
+        speaker.skip(-2);
+        e.preventDefault();
+      }
+      if (e.key === "ArrowRight" && e.altKey) {
+        speaker.skip(2);
+        e.preventDefault();
+      }
     });
 
     $('#reload-button').on('click', () => {
-      if (confirm('Reload the plugin?')) {
+      if (confirm('Restart the episode?')) {
         location.reload();
       }
     });

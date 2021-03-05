@@ -22,6 +22,7 @@ limitations under the License.
   <script src="https://gstatic.com/external_hosted/threejs-r104/three.js"></script>
   <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/controls/OrbitControls.js"></script>
   <script src="https://gstatic.com/external_hosted/threejs-r104/examples/js/libs/tween.min.js"></script>
+  <script src="https://www.gstatic.com/external_hosted/wavesurfer/wavesurfer_min.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-app.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-auth.js"></script>
   <script src="https://gstatic.com/firebasejs/7.13.1/firebase-firestore.js"></script>
@@ -37,22 +38,39 @@ limitations under the License.
   </div>
   <div id="nav-tab" style="display: none;">
     <p>Microphone volume:</p>
-    <canvas id="mic-canvas" width="200" height="10" style="border: 1px solid #000000;"></canvas>
+    <canvas id="mic-canvas" width="640px" height="10" style="border: 1px solid #000000;"></canvas>
     <br>
     <br>
-    <button id="start-button">Start</button>
+    <button id="start-button">Resume</button>
     <button id="pause-button" disabled>Pause</button>
     <button id="transcribe-button" disabled>Transcribe</button>
     <br>
     <br>
-    <div id="env-div" style="width: 1000px; height: 500px;">
-      <div id="env-blocker" style="position: absolute; z-index: 1; width: 1000px; height: 500px; background-color: rgba(0,0,0,0.5);"></div>
-      <canvas id="env-canvas" width="1000px" height="500px" style="position: absolute; z-index: 0; width: 1000px; height: 500px;"></canvas>
+    <div id="env-div" style="width: 640px; height: 480px;">
+      <div id="env-blocker" style="position: absolute; z-index: 1; width: 640px; height: 480px; background-color: rgba(0,0,0,0.5);"></div>
+      <canvas id="env-canvas" width="640px" height="480px" style="position: absolute; z-index: 0; width: 640px; height: 480px;"></canvas>
     </div>
   </div>
   <br>
   <div id="transcribe-tab" style="display: none;">
-    <audio controls id="audio-controls" style="width: 1000px;"></audio>
+    <label for="playback-select">Playback speed:</label>
+    <select id="playback-select">
+      <option value="0.5">0.5x</option>
+      <option value="0.8">0.8x</option>
+      <option value="1" selected>1x</option>
+      <option value="1.2">1.2x</option>
+      <option value="1.5">1.5x</option>
+    </select>
+    <br>
+    <small>Use the ESC key to play/pause the audio. ALT + left/right arrow key will skip the audio
+      backwards or forwards.</small>
+    <br>
+    <br>
+    <button id="playpause-button">Play</button>
+    <br>
+    <br>
+    <div id="waveform" style="width: 640px;"></div>
+    <br>
     <p>Please transcribe your audio in <span id="lang-str"></span></p>
     <small>
       Please include any disfluencies and filler words you used (e.g., "I think", "alright", and
@@ -62,11 +80,11 @@ limitations under the License.
     </small>
     <br>
     <br>
-    <textarea id="transcribe-input" class="form-control" spellcheck="true" style="width: 1000px; height: 50px; resize: vertical;"></textarea>
+    <textarea id="transcribe-input" class="form-control" spellcheck="true" style="width: 640px; height: 50px; resize: vertical;"></textarea>
     <button id="transcribe-controls" style="display: none;"></button>
     <br>
     <br>
-    <button id="reload-button">Reload</button>
+    <button id="reload-button">Restart</button>
     <button id="submit-button" disabled>Submit</button>
     <p id="upload-prog-flag" style="display: none;">Submitting your annotation...</p>
     <p id="upload-done-flag" style="display: none;">Submitting complete</p>
@@ -157,6 +175,10 @@ limitations under the License.
     // Prevent the user from seeing the poles.
     env.controls.maxPolarAngle = Math.PI * 5 / 6;
     env.controls.minPolarAngle = Math.PI * 1 / 6;
+    // Hyperparameters for the controls.
+    env.controls.panSpeed = 0.75;
+    env.controls.rotateSpeed = 0.75;
+    env.controls.enableKeys = false; // Interferes with using arrowkeys in the textarea input.
 
     // Draw the path from the args.
     env.scene.add(new THREE.AmbientLight());
@@ -197,12 +219,18 @@ limitations under the License.
     // Initialize the microphone and speaker.
     const mic =
         new pangea.Microphone(new pangea.RmsMeter($('#mic-canvas')[0], '#000000', '#ffff00'));
-    const speaker = $('#audio-controls')[0];
+    const speaker = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#A8DBA8',
+      progressColor: '#3B8686',
+      barHeight: 4,
+    });
 
     // Phase 0 to 1.
     $('#begin-button').on('click', () => {
       $('#inst-tab').fadeOut().promise().done(() => {
         $('#nav-tab').fadeIn();
+        $('#start-button')[0].click();
       });
       stopTime0 = performance.now();
     });
@@ -234,19 +262,45 @@ limitations under the License.
       recording = false;
     });
 
+    $('#playback-select').on('change', () => {
+      speaker.setPlaybackRate($('#playback-select option:selected').val());
+    });
+
+    $('#playpause-button').on('click', () => {
+      if (speaker.isPlaying()) {
+        speaker.pause()
+        $('#playpause-button').html('Play');
+      } else {
+        speaker.play();
+        $('#playpause-button').html('Pause');
+      }
+    });
+    speaker.on('finish', () => {
+      $('#playpause-button').html('Play');
+    });
+
     // Use esc to play and pause the environment (phase 0) and speaker (phase 1).
     $(document).on('keydown', (e) => {
       if (e.key === 'Escape') {
         if ($('#transcribe-tab').is(':hidden')) {
           (recording) ? $('#pause-button')[0].click() : $('#start-button')[0].click();
         } else if ($('#transcribe-tab').is(':visible')) {
-          (speaker.paused) ? speaker.play() : speaker.pause();
+          $('#playpause-button')[0].click();
         }
+      }
+      // ALT + Left or right arrows skip the audio by 2 seconds.
+      if (e.key === "ArrowLeft" && e.altKey) {
+        speaker.skip(-2);
+        e.preventDefault();
+      }
+      if (e.key === "ArrowRight" && e.altKey) {
+        speaker.skip(2);
+        e.preventDefault();
       }
     });
 
     $('#reload-button').on('click', () => {
-      if (confirm('Reload the plugin?')) {
+      if (confirm('Restart the episode?')) {
         location.reload();
       }
     });
@@ -263,15 +317,18 @@ limitations under the License.
 
         // Synchronize snapshots and speaker.
         const wav = await mic.dump();
-        speaker.src = URL.createObjectURL(wav);
-        new pangea.Animation(() => {
-          const snapshot = pangea.keymin(snapshots, (snapshot) => {
-            return Math.abs(snapshot.time - speaker.currentTime * 1000);
-          });
-          env.setSnapshot(snapshot);
-          env.update();
-          drawing.update();
-        }).start();
+        speaker.loadBlob(wav);
+        speaker.on('ready', () => {
+          speaker.drawBuffer();
+          new pangea.Animation(() => {
+            const snapshot = pangea.keymin(snapshots, (snapshot) => {
+              return Math.abs(snapshot.time - speaker.getCurrentTime() * 1000);
+            });
+            env.setSnapshot(snapshot);
+            env.update();
+            drawing.update();
+          }).start();
+        });
 
         if (USE_FIREBASE) {
           // Wait for uploads to finish.
