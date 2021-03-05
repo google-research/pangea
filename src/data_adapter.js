@@ -29,20 +29,27 @@ export class Matterport3D {
   /**
    * Matterport3D constructor.
    * @param {string} path Directory or a url https://storage.googleapis.com/...
+   * @param {boolean=} flatten Whether the directory tree has been flattened
+   *     with `path` as the root and no intermediate directories. For example:
+   * `${path}/connectivity/${scan}_connectivity.json` becomes
+   * `${path}/${scan}_connectivity.json`.
    */
-  constructor(path) {
+  constructor(path, flatten = false) {
     /** @type {string} */
     this.path = path;
+    /** @type {boolean} */
+    this.flatten = flatten;
   }
 
   /**
    * Returns the raw connectivity entries from the Matteport3D simulator.
    * https://github.com/peteanderson80/Matterport3DSimulator/tree/master/connectivity
    * @param {string} scan Scan id.
-   * @return {!Array<!Object>}
+   * @return {!Promise<!Array<!Object>>}
    */
   async getEntries(scan) {
-    return await getJSON(`${this.path}/connectivity/${scan}_connectivity.json`);
+    const dir = this.flatten ? this.path : `${this.path}/connectivity`;
+    return await getJSON(`${dir}/${scan}_connectivity.json`);
   }
 
   /**
@@ -53,7 +60,9 @@ export class Matterport3D {
    * @return {!Array<string>}
    */
   getUrls(entry, scan) {
-    const dir = `${this.path}/data/v1/scans/${scan}/matterport_skybox_images`;
+    const dir = this.flatten ?
+        this.path :
+        `${this.path}/data/v1/scans/${scan}/matterport_skybox_images`;
     const id = this.getId(entry);
     return [
       `${dir}/${id}_skybox2_sami.jpg`, `${dir}/${id}_skybox4_sami.jpg`,
